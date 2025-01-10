@@ -3,12 +3,10 @@ from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 
 
-# Flask and SocketIO setup
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app)
 
-# WebSocket event handlers
 @socketio.on('offer')
 def handle_offer(data):
     emit('offer', data, broadcast=True)
@@ -17,6 +15,5 @@ def handle_offer(data):
 def handle_answer(data):
     emit('answer', data, broadcast=True)
 
-# Start the Flask-SocketIO server
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=8000)
