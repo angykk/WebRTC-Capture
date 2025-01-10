@@ -1,8 +1,11 @@
 from flask import Flask
 from flask_socketio import SocketIO, emit
+from flask_cors import CORS
+
 
 # Flask and SocketIO setup
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app)
 
 # WebSocket event handlers
