@@ -3,6 +3,8 @@ from flask_socketio import SocketIO, emit
 import cv2
 import asyncio
 
+socketio = SocketIO()
+
 pc = RTCPeerConnection()
 
 # Track for displaying video

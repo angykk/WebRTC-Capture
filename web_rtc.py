@@ -1,8 +1,5 @@
 from flask import Flask
 from flask_socketio import SocketIO, emit
-from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
-import cv2
-import asyncio
 
 # Flask and SocketIO setup
 app = Flask(__name__)

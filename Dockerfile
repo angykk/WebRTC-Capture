@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-
+#docker build -t rtc .
+#docker run -it rtc  
 # Comments are provided throughout this file to help you get started.
 # If you need more help, visit the Dockerfile reference guide at
 # https://docs.docker.com/go/dockerfile-reference/
