@@ -1,34 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 void main() async {
-  await dotenv.load(fileName: ".env");
   runApp(const MyApp());
-}
-
-final localRenderer = RTCVideoRenderer();
-var frontFacing = false;
-
-Future<void> startCameraStream() async {
-  await localRenderer.initialize();
-  try {
-    final stream = await navigator.mediaDevices.getUserMedia({
-      'video': true,
-      'audio': false,
-    });
-    localRenderer.srcObject = stream;
-  } catch (e) {
-    print("Error starting camera: $e");
-  }
-}
-
-void switchCamera() {
-  final camera = Helper.switchCamera(
-    localRenderer.srcObject!.getVideoTracks()[0],
-  );
-  frontFacing = !frontFacing;
 }
 
 class MyApp extends StatefulWidget {
@@ -39,65 +14,74 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
+  late RTCVideoRenderer localRenderer;
   late Future<void> _cameraInitialization;
   late IO.Socket socket;
   late RTCPeerConnection pc;
 
+  var frontFacing = false;
+
+  Future<void> startCameraStream() async {
+    await localRenderer.initialize();
+    try {
+      final stream = await navigator.mediaDevices.getUserMedia({
+        'video': true,
+        'audio': false,
+      });
+      localRenderer.srcObject = stream;
+    } catch (e) {
+      print("Error starting camera: $e");
+    }
+  }
+
+  void switchCamera() {
+    Helper.switchCamera(
+      localRenderer.srcObject!.getVideoTracks()[0],
+    );
+    frontFacing = !frontFacing;
+  }
+
   Future<void> createOffer() async {
-    pc = await createPeerConnection({});
+    try {
+      await _cameraInitialization;
+      pc = await createPeerConnection({});
 
-    var offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+      // Add the local stream to the peer connection
+      localRenderer.srcObject?.getVideoTracks().forEach((track) {
+        pc.addTrack(track, localRenderer.srcObject!).catchError((error) {
+          print('Error adding track: $error');
+        });
+      });
 
-    // Send the SDP offer to the signaling server
-    socket.emit('offer', {
-      'sdp': offer.sdp,
-      'type': offer.type,
-    });
-  }
+      var offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
 
-  void handleOffer(dynamic data) async {
-    var remoteDesc = RTCSessionDescription(data['sdp'], data['type']);
-    await pc.setRemoteDescription(remoteDesc);
-
-    var answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-
-    socket.emit('answer', {
-      'sdp': answer.sdp,
-      'type': answer.type,
-    });
-  }
-
-  void handleAnswer(dynamic data) async {
-    var remoteDesc = RTCSessionDescription(data['sdp'], data['type']);
-    await pc.setRemoteDescription(remoteDesc);
+      socket.emit('offer', {
+        'sdp': offer.sdp,
+        'type': offer.type,
+      });
+      print('Offer sent');
+    } catch (e) {
+      print('Error creating offer: $e');
+    }
   }
 
   @override
   void initState() {
     super.initState();
+    localRenderer = RTCVideoRenderer();
     _cameraInitialization = startCameraStream();
 
-    String serverIp = dotenv.env['SERVER_IP'] ?? '127.0.0.1';
-    socket = IO.io('http://$serverIp:8000', <String, dynamic>{
+    socket = IO.io('http://192.168.2.44:5000', <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': false,
     });
 
     socket.connect();
 
-    socket.on('connect', (_) {
+    socket.onConnect((_) {
       print('Connected to signaling server');
-      createOffer(); 
-    });
-
-    socket.on('offer', (data) {
-      handleOffer(data);
-    });
-
-    socket.on('answer', (data) {
-      handleAnswer(data);
+      createOffer();
     });
   }
 
@@ -139,7 +123,8 @@ class _MyAppState extends State<MyApp> {
                     child: RTCVideoView(
                       localRenderer,
                       mirror: frontFacing,
-                      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                      objectFit:
+                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                     ),
                   ),
                 ],
