@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-void main() async {
+Future<void> main() async {
+  await dotenv.load(fileName: ".env");
   runApp(const MyApp());
 }
 
@@ -17,6 +19,7 @@ class _MyAppState extends State<MyApp> {
   late RTCVideoRenderer localRenderer;
   late Future<void> _cameraInitialization;
   late IO.Socket socket;
+  late String? ipAddress;
   late RTCPeerConnection pc;
 
   var frontFacing = false;
@@ -44,7 +47,11 @@ class _MyAppState extends State<MyApp> {
   Future<void> createOffer() async {
     try {
       await _cameraInitialization;
-      pc = await createPeerConnection({});
+      pc = await createPeerConnection({
+        'iceServers': [
+          {'urls': 'stun:stun.l.google.com:19302'},
+        ]
+      }, {});
 
       // Add the local stream to the peer connection
       localRenderer.srcObject?.getVideoTracks().forEach((track) {
@@ -61,18 +68,35 @@ class _MyAppState extends State<MyApp> {
         'type': offer.type,
       });
       print('Offer sent');
+
+      socket.on('answer', (data) async {
+        print('Received answer:');
+        if (pc.signalingState ==
+            RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
+          await pc.setRemoteDescription(
+              RTCSessionDescription(data['sdp'], data['type']));
+          print('Answer received and set');
+        } else {
+          print('Cannot set remote description in state: ${pc.signalingState}');
+        }
+      });
     } catch (e) {
       print('Error creating offer: $e');
     }
   }
 
+  void connect() async {
+    ipAddress = dotenv.env['SERVER_IP'];
+  }
+
   @override
   void initState() {
     super.initState();
+    connect();
     localRenderer = RTCVideoRenderer();
     _cameraInitialization = startCameraStream();
 
-    socket = IO.io('http://192.168.2.44:5000', <String, dynamic>{
+    socket = IO.io(ipAddress, <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': false,
     });
