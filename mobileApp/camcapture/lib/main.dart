@@ -46,7 +46,6 @@ class _MyAppState extends State<MyApp> {
 
   Future<void> createOffer() async {
     try {
-      await _cameraInitialization;
       pc = await createPeerConnection({
         'iceServers': [
           {'urls': 'stun:stun.l.google.com:19302'},
@@ -59,6 +58,17 @@ class _MyAppState extends State<MyApp> {
           print('Error adding track: $error');
         });
       });
+      // Handle ICE candidates
+      pc.onIceCandidate = (candidate) {
+        print('Sending ice candidate');
+        if (candidate != null) {
+          socket.emit('icecandidate', {
+            'candidate': candidate.candidate,
+            'sdpMid': candidate.sdpMid,
+            'sdpMLineIndex': candidate.sdpMLineIndex,
+          });
+        }
+      };
 
       var offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -80,19 +90,33 @@ class _MyAppState extends State<MyApp> {
           print('Cannot set remote description in state: ${pc.signalingState}');
         }
       });
+
+      socket.on('icecandidate', (data) async {
+        var candidate = RTCIceCandidate(
+          data['candidate'],
+          data['sdpMid'],
+          data['sdpMLineIndex'],
+        );
+        await pc.addCandidate(candidate);
+        print('ICE candidate added');
+      });
     } catch (e) {
       print('Error creating offer: $e');
     }
   }
 
-  void connect() async {
+  Future<void> connect() async {
     ipAddress = dotenv.env['SERVER_IP'];
   }
 
   @override
   void initState() {
     super.initState();
-    connect();
+    initialize();
+  }
+
+  Future<void> initialize() async {
+    await connect();
     localRenderer = RTCVideoRenderer();
     _cameraInitialization = startCameraStream();
 
