@@ -20,7 +20,9 @@ class _MyAppState extends State<MyApp> {
   late Future<void> _cameraInitialization;
   late IO.Socket socket;
   late String? ipAddress;
-  late RTCPeerConnection pc;
+  RTCPeerConnection? pc; // Changed to nullable
+  List<Map<String, dynamic>> pendingIceCandidates =
+      []; // Queue for ICE candidates
 
   var frontFacing = false;
 
@@ -47,34 +49,41 @@ class _MyAppState extends State<MyApp> {
   Future<void> createOffer() async {
     try {
       await _cameraInitialization;
+
       pc = await createPeerConnection({
         'iceServers': [
           {'urls': 'stun:stun.l.google.com:19302'},
         ]
       }, {});
 
-      // Add the local stream to the peer connection
-      pc.addStream(localRenderer.srcObject!);
-
-      print("sent video");
-
-      var offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      socket.emit('offer', {
-        'sdp': offer.sdp,
-        'type': offer.type,
-      });
-      print('Offer sent');
-
-      pc?.onIceCandidate = (RTCIceCandidate candidate) {
-        print("sending ice candidate");
+      // Set up ICE candidate handler BEFORE creating offer
+      pc!.onIceCandidate = (RTCIceCandidate candidate) {
+        print("Sending ICE candidate");
         socket.emit('icecandidate', {
           'sdpMid': candidate.sdpMid,
           'sdpMLineIndex': candidate.sdpMLineIndex,
           'candidate': candidate.candidate,
         });
       };
+
+      // Monitor ICE connection state
+      pc!.onIceConnectionState = (RTCIceConnectionState state) {
+        print("ICE Connection State: $state");
+      };
+
+      // Add the local stream to the peer connection
+      pc!.addStream(localRenderer.srcObject!);
+
+      print("Creating offer...");
+
+      var offer = await pc!.createOffer();
+      await pc!.setLocalDescription(offer);
+
+      socket.emit('offer', {
+        'sdp': offer.sdp,
+        'type': offer.type,
+      });
+      print('Offer sent');
     } catch (e) {
       print('Error creating offer: $e');
     }
@@ -102,25 +111,67 @@ class _MyAppState extends State<MyApp> {
       print('Connected to signaling server');
       createOffer();
     });
+
     socket.on('answer', (data) async {
-      print('Received answer:');
-      if (pc.signalingState ==
+      print('Received answer');
+
+      if (pc == null) {
+        print('PC not initialized yet');
+        return;
+      }
+
+      if (pc!.signalingState ==
           RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
-        await pc.setRemoteDescription(
+        await pc!.setRemoteDescription(
             RTCSessionDescription(data['sdp'], data['type']));
         print('Answer received and set');
+
+        // Process any pending ICE candidates
+        for (var candidateData in pendingIceCandidates) {
+          try {
+            var candidate = RTCIceCandidate(
+              candidateData['candidate'],
+              candidateData['sdpMid'],
+              candidateData['sdpMLineIndex'],
+            );
+            await pc!.addCandidate(candidate);
+            print('Added pending ICE candidate');
+          } catch (e) {
+            print('Error adding pending candidate: $e');
+          }
+        }
+        pendingIceCandidates.clear();
       } else {
-        print('Cannot set remote description in state: ${pc.signalingState}');
+        print('Cannot set remote description in state: ${pc!.signalingState}');
       }
     });
+
     socket.on('icecandidate', (data) async {
-      print("receiving ice candidate");
-      var candidate = RTCIceCandidate(
-        data['candidate'],
-        data['sdpMid'],
-        data['sdpMLineIndex'],
-      );
-      await pc.addCandidate(candidate);
+      print("Receiving ICE candidate");
+
+      if (pc == null) {
+        print('PC not initialized, queuing ICE candidate');
+        return;
+      }
+
+      var remoteDesc = await pc!.getRemoteDescription();
+      if (remoteDesc == null) {
+        print('Remote description not set, queuing ICE candidate');
+        pendingIceCandidates.add(data);
+        return;
+      }
+
+      try {
+        var candidate = RTCIceCandidate(
+          data['candidate'],
+          data['sdpMid'],
+          data['sdpMLineIndex'],
+        );
+        await pc!.addCandidate(candidate);
+        print('ICE candidate added');
+      } catch (e) {
+        print('Error adding ICE candidate: $e');
+      }
     });
   }
 
@@ -128,7 +179,7 @@ class _MyAppState extends State<MyApp> {
   void dispose() {
     localRenderer.dispose();
     socket.dispose();
-    pc.close();
+    pc?.close();
     super.dispose();
   }
 
