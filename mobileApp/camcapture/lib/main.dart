@@ -54,11 +54,9 @@ class _MyAppState extends State<MyApp> {
       }, {});
 
       // Add the local stream to the peer connection
-      localRenderer.srcObject?.getVideoTracks().forEach((track) {
-        pc.addTrack(track, localRenderer.srcObject!).catchError((error) {
-          print('Error adding track: $error');
-        });
-      });
+      pc.addStream(localRenderer.srcObject!);
+
+      print("sent video");
 
       var offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -69,17 +67,14 @@ class _MyAppState extends State<MyApp> {
       });
       print('Offer sent');
 
-      socket.on('answer', (data) async {
-        print('Received answer:');
-        if (pc.signalingState ==
-            RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
-          await pc.setRemoteDescription(
-              RTCSessionDescription(data['sdp'], data['type']));
-          print('Answer received and set');
-        } else {
-          print('Cannot set remote description in state: ${pc.signalingState}');
-        }
-      });
+      pc?.onIceCandidate = (RTCIceCandidate candidate) {
+        print("sending ice candidate");
+        socket.emit('icecandidate', {
+          'sdpMid': candidate.sdpMid,
+          'sdpMLineIndex': candidate.sdpMLineIndex,
+          'candidate': candidate.candidate,
+        });
+      };
     } catch (e) {
       print('Error creating offer: $e');
     }
@@ -98,7 +93,7 @@ class _MyAppState extends State<MyApp> {
 
     socket = IO.io(ipAddress, <String, dynamic>{
       'transports': ['websocket'],
-      'autoConnect': false,
+      'autoConnect': true,
     });
 
     socket.connect();
@@ -106,6 +101,26 @@ class _MyAppState extends State<MyApp> {
     socket.onConnect((_) {
       print('Connected to signaling server');
       createOffer();
+    });
+    socket.on('answer', (data) async {
+      print('Received answer:');
+      if (pc.signalingState ==
+          RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
+        await pc.setRemoteDescription(
+            RTCSessionDescription(data['sdp'], data['type']));
+        print('Answer received and set');
+      } else {
+        print('Cannot set remote description in state: ${pc.signalingState}');
+      }
+    });
+    socket.on('icecandidate', (data) async {
+      print("receiving ice candidate");
+      var candidate = RTCIceCandidate(
+        data['candidate'],
+        data['sdpMid'],
+        data['sdpMLineIndex'],
+      );
+      await pc.addCandidate(candidate);
     });
   }
 
