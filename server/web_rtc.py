@@ -2,7 +2,7 @@
 import asyncio
 from flask import Flask
 from flask_socketio import SocketIO
-from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate
+from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCRtpReceiver
 import cv2
 import threading 
 
@@ -36,12 +36,24 @@ def parse_ice_candidate(candidate_string):
     
     return parts
 
+async def set_up_filter():
+    global pc
+    pc.addTransceiver('video', direction='recvonly')
+
+    supported_codecs = RTCRtpReceiver.getCapabilities("video").codecs
+    filtered_codecs = [c for c in supported_codecs if c.mimeType in ("video/VP8", "video/H264")]
+    pc.getTransceivers()[0].setCodecPreferences(filtered_codecs)
+
+
 @socketio.on('connect')
 def on_connect():
     global pc, ice_candidates
     print("Client connected")
     pc = RTCPeerConnection()
     ice_candidates = []
+    def _setup():
+        return set_up_filter()
+    asyncio.run_coroutine_threadsafe(_setup(), loop)
     
     @pc.on('signalingstatechange')
     async def on_signaling_state_change():
